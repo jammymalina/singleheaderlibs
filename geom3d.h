@@ -67,7 +67,8 @@ static int init_counts(uint8_t options,
 	uint32_t *indices_count, uint32_t indices_count_val,
 	uint32_t *positions_count, uint32_t positions_count_val,
 	uint32_t *normals_count, uint32_t normals_count_val,
-	uint32_t *uvs_count, uint32_t uvs_count_val) {
+	uint32_t *uvs_count, uint32_t uvs_count_val
+) {
 	if (options & GEOM3D_GENERATE_INDICES) {
 		if (!indices_count) return 0;
 		*indices_count = indices_count_val;
@@ -92,8 +93,8 @@ static int alloc_arrays(uint8_t options,
 	uint32_t **indices, uint32_t indices_count,
 	float **positions, uint32_t positions_count,
 	float **normals, uint32_t normals_count,
-	float **uvs, uint32_t uvs_count) {
-
+	float **uvs, uint32_t uvs_count
+) {
 	if (options & GEOM3D_GENERATE_INDICES) {
 		if (!indices) return 0;
 		*indices = (uint32_t*) calloc(indices_count, sizeof(uint32_t));
