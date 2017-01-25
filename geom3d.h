@@ -170,8 +170,8 @@ int box_buffer_geometry(
 	const struct panel panels[] = {
 		{ 2, 1, 0, -1, -1, depth, height,  width,  depth_segments, height_segments },
 		{ 2, 1, 0,  1, -1, depth, height, -width,  depth_segments, height_segments },
-		{ 0, 2, 1,  1,  1, width, depth,   height, width_segments, depth_segments },
-		{ 0, 2, 1,  1, -1, width, depth,  -height, width_segments, depth_segments },
+		{ 0, 2, 1,  1,  1, width, depth,   height, width_segments, depth_segments  },
+		{ 0, 2, 1,  1, -1, width, depth,  -height, width_segments, depth_segments  },
 		{ 0, 1, 2,  1, -1, width, height,  depth,  width_segments, height_segments },
 		{ 0, 1, 2, -1, -1, width, height,  depth,  width_segments, height_segments }
 	};
