@@ -373,6 +373,9 @@ int cylinder_buffer_geometry(
 	float theta_start, float theta_length,
 	uint32_t radial_segments, uint32_t height_segments
 ) {
+	theta_start = to_radians(theta_start);
+	theta_length = to_radians(theta_length);
+
 	float radius[2] = { radius_top, radius_bottom };
 	height = height == 0 ? 1 : 0;
 
@@ -411,9 +414,6 @@ int cylinder_buffer_geometry(
 		normals, *normals_count,
 		uvs, *uvs_count)
 	) return 0;
-
-	uint32_t index = 0;
-	uint32_t index_offset = 0;
 
 	float half_height = 0.5 * height;
 
