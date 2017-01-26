@@ -10,6 +10,7 @@
 #define GEOM3D_GENERATE_BASIC (GEOM3D_GENERATE_INDICES | GEOM3D_GENERATE_POSITIONS)
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,14 +34,24 @@ extern "C" {
 		float radius, float theta_start, float theta_length,
 		uint32_t segments
 	);
+	extern int cone_buffer_geometry(
+		uint8_t options,
+		uint32_t **indices, uint32_t *indices_count,
+		float **positions, uint32_t *positions_count,
+		float **normals, uint32_t *normals_count,
+		float **uvs, uint32_t *uvs_count,
+		float radius, float height, bool open_ended,
+		float theta_start, float theta_length,
+		uint32_t radial_segments, uint32_t height_segments
+	);
 	extern int cylinder_buffer_geometry(
 		uint8_t options,
 		uint32_t **indices, uint32_t *indices_count,
 		float **positions, uint32_t *positions_count,
 		float **normals, uint32_t *normals_count,
 		float **uvs, uint32_t *uvs_count,
-		float radius_top, float radius_bottom, float height,
-		int open_ended, float theta_start, float theta_length,
+		float radius_top, float radius_bottom, float height, bool open_ended,
+		float theta_start, float theta_length,
 		uint32_t radial_segments, uint32_t height_segments
 	);
 
@@ -56,11 +67,24 @@ extern "C" {
 #include <stdlib.h>
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+	#define M_PI 3.14159265358979323846
 #endif
 
 static float to_radians(float degrees) {
 	return degrees * (M_PI / 180.0);
+}
+
+static float normalize_vec(float *vec, size_t size) {
+	float l = 0;
+	for (size_t i = 0; i < size; i++) {
+		l += vec[i] * vec[i];
+	}
+	l = sqrt(l);
+	l = l == 0 ? 1 : l;
+	for (size_t i = 0; i < size; i++) {
+		vec[i] = vec[i] / l;
+	}
+	return l;
 }
 
 static int init_counts(uint8_t options,
@@ -312,6 +336,245 @@ int circle_buffer_geometry(
 			*iter++ = i;
 			*iter++ = i + 1;
 			*iter++ = 0;
+		}
+	}
+
+	return 1;
+}
+
+int cone_buffer_geometry(
+	uint8_t options,
+	uint32_t **indices, uint32_t *indices_count,
+	float **positions, uint32_t *positions_count,
+	float **normals, uint32_t *normals_count,
+	float **uvs, uint32_t *uvs_count,
+	float radius, float height, bool open_ended,
+	float theta_start, float theta_length,
+	uint32_t radial_segments, uint32_t height_segments
+) {
+	return cylinder_buffer_geometry(
+		options,
+		indices, indices_count,
+		positions, positions_count,
+		normals, normals_count,
+		uvs, uvs_count,
+		-1, radius, height, open_ended,
+		theta_start, theta_length, radial_segments, height_segments
+	);
+}
+
+int cylinder_buffer_geometry(
+	uint8_t options,
+	uint32_t **indices, uint32_t *indices_count,
+	float **positions, uint32_t *positions_count,
+	float **normals, uint32_t *normals_count,
+	float **uvs, uint32_t *uvs_count,
+	float radius_top, float radius_bottom, float height, bool open_ended,
+	float theta_start, float theta_length,
+	uint32_t radial_segments, uint32_t height_segments
+) {
+	float radius[2] = { radius_top, radius_bottom };
+	height = height == 0 ? 1 : 0;
+
+	radial_segments = radial_segments < 1 ? 1 : radial_segments;
+	height_segments = height_segments < 1 ? 1 : height_segments;
+
+	uint32_t points_count = 0;
+	uint32_t index_count = 0;
+
+	// torso
+	points_count += (radial_segments + 1) * (height_segments + 1);
+	index_count += radial_segments * height_segments * 3 * 2;
+
+	// caps
+	if (!open_ended) {
+		for (size_t i = 0; i < 2; i++) {
+			float r = radius[i];
+			if (r <= 0) continue;
+			points_count += radial_segments + (radial_segments + 1);
+			index_count += radial_segments * 3;
+		}
+	}
+
+	if (!init_counts(
+		options,
+		indices_count, index_count,
+		positions_count, points_count * 3,
+		normals_count, points_count * 3,
+		uvs_count, points_count * 2)
+	) return 0;
+
+	if (!alloc_arrays(
+		options,
+		indices, *indices_count,
+		positions, *positions_count,
+		normals, *normals_count,
+		uvs, *uvs_count)
+	) return 0;
+
+	uint32_t index = 0;
+	uint32_t index_offset = 0;
+
+	float half_height = 0.5 * height;
+
+	// generate torso
+	uint32_t *indices_iter = options & GEOM3D_GENERATE_INDICES ? *indices : NULL;
+	float *position_iter = options & GEOM3D_GENERATE_POSITIONS ? *positions : NULL;
+	float *normal_iter = options & GEOM3D_GENERATE_NORMALS ? *normals : NULL;
+	float *uv_iter = options & GEOM3D_GENERATE_UVS ? *uvs : NULL;
+
+	uint32_t x, y, index = 0;
+	float slope = (radius_bottom - radius_top) / height;
+	float normal[3] = { 0, 0, 0 };
+
+	uint32_t *index_grid = options & GEOM3D_GENERATE_INDICES ?
+		(uint32_t*) malloc((height_segments + 1) * (radial_segments + 1) * sizeof(uint32_t)) : NULL;
+	if ((options & GEOM3D_GENERATE_INDICES) && !index_grid) return 0;
+	uint32_t *index_grid_iter = index_grid;
+
+	for (y = 0; y <= height_segments; y++) {
+		float v = ((float) y) / height_segments;
+		float r = v * (radius_bottom - radius_top) + radius_top;
+
+		for (x = 0; x <= radial_segments; x++) {
+			float u = ((float) x) / radial_segments;
+			float theta = u * theta_length + theta_start;
+			float sin_theta = sin(theta);
+			float cos_theta = cos(theta);
+
+			// positions
+			if (options & GEOM3D_GENERATE_POSITIONS) {
+				*position_iter++ = r * sin_theta;
+				*position_iter++ = -v * height + half_height;
+				*position_iter++ = r * cos_theta;
+			}
+
+			// normals
+			if (options & GEOM3D_GENERATE_NORMALS) {
+				normal[0] = sin_theta;
+				normal[1] = slope;
+				normal[2] = cos_theta;
+				normalize_vec(normal, 3);
+				*normal_iter++ = normal[0];
+				*normal_iter++ = normal[1];
+				*normal_iter++ = normal[2];
+			}
+
+			// uvs
+			if (options & GEOM3D_GENERATE_UVS) {
+				*uv_iter++ = u;
+				*uv_iter++ = 1 - v;
+			}
+
+			// indices
+			if (options & GEOM3D_GENERATE_INDICES) {
+				*index_grid_iter++ = index;
+				index++;
+			}
+		}
+	}
+
+	if (options & GEOM3D_GENERATE_INDICES) {
+		for (x = 0; x < radial_segments; x++) {
+			for (y = 0; y < height_segments; y++) {
+				uint32_t a = index_grid[y * (radial_segments + 1) + x];
+				uint32_t b = index_grid[(y + 1) * (radial_segments + 1) + x];
+				uint32_t c = index_grid[(y + 1) * (radial_segments + 1) + (x + 1)];
+				uint32_t d = index_grid[y * (radial_segments + 1) + (x + 1)];
+
+				*indices_iter++ = a;
+				*indices_iter++ = b;
+				*indices_iter++ = d;
+
+				*indices_iter++ = b;
+				*indices_iter++ = c;
+				*indices_iter++ = d;
+			}
+		}
+		free(index_grid);
+	}
+
+	// generate caps
+	if (!open_ended) {
+		for (size_t i = 0; i < 2; i++) {
+			uint32_t center_index_start, center_index_end;
+			float r = radius[i];
+			if (r <= 0) continue;
+			int sign = i == 0 ? 1 : -1;
+
+			center_index_start = index;
+			for (x = 1; x <= radial_segments; x++) {
+				// positions
+				if (options & GEOM3D_GENERATE_POSITIONS) {
+					*position_iter++ = 0;
+					*position_iter++ = half_height * sign;
+					*position_iter++ = 0;
+				}
+
+				// normals
+				if (options & GEOM3D_GENERATE_NORMALS) {
+					*normal_iter++ = 0;
+					*normal_iter++ = (float) sign;
+					*normal_iter++ = 0;
+				}
+
+				// uvs
+				if (options & GEOM3D_GENERATE_UVS) {
+					*uv_iter++ = 0.5;
+					*uv_iter++ = 0.5;
+				}
+
+				index++;
+			}
+			center_index_end = index;
+
+			for (x = 0; x <= radial_segments; x++) {
+				float u = ((float) x) / radial_segments;
+				float theta = u * theta_length + theta_start;
+
+				float cos_theta = cos(theta);
+				float sin_theta = sin(theta);
+
+				// positions
+				if (options & GEOM3D_GENERATE_POSITIONS) {
+					*position_iter++ = r * sin_theta;
+					*position_iter++ = half_height * sign;
+					*position_iter++ = r * cos_theta;
+				}
+
+				// normals
+				if (options & GEOM3D_GENERATE_NORMALS) {
+					*normal_iter++ = 0;
+					*normal_iter++ = (float) sign;
+					*normal_iter++ = 0;
+				}
+
+				// uvs
+				if (options & GEOM3D_GENERATE_UVS) {
+					*uv_iter++ = cos_theta * 0.5 + 0.5;
+					*uv_iter++ = sin_theta * 0.5 * sign + 0.5;
+				}
+
+				index++;
+			}
+
+			if (options & GEOM3D_GENERATE_INDICES) {
+				for (x = 0; x < radial_segments; x++) {
+					uint32_t c = center_index_start + x;
+					uint32_t k = center_index_end + x;
+
+					// top else bottom
+					if (i == 0) {
+						*indices_iter++ = k;
+						*indices_iter++ = k + 1;
+						*indices_iter++ = c;
+					} else {
+						*indices_iter++ = k + 1;
+						*indices_iter++ = k;
+						*indices_iter++ = c;
+					}
+				}
+			}
 		}
 	}
 
